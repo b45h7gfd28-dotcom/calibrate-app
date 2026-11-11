@@ -53,10 +53,10 @@ const SUBJECTS = {
 
 const STORAGE_KEY = 'calibrate-demo-v2';
 const CATEGORY = {
-  stable: { label: '높은 확신의 정답', note: '알고 있고, 알고 있다고 판단했어요.' },
-  under: { label: '낮은 확신의 정답', note: '맞혔지만 스스로는 확신하지 못했어요.' },
-  aware: { label: '낮은 확신의 오답', note: '잘 모르고 있다는 점을 인식했어요.' },
-  over: { label: '높은 확신의 오답', note: '맞다고 믿었지만 다시 확인이 필요해요.' }
+  stable: { label: '높은 확신의 정답', note: '알고 있으며, 알고 있다고 판단' },
+  under: { label: '낮은 확신의 정답', note: '이해하지만 확신 부족 (과소확신)' },
+  aware: { label: '낮은 확신의 오답', note: '모른다는 것을 인식' },
+  over: { label: '높은 확신의 오답', note: '잘못 알면서 맞다고 판단 (과잉확신)' }
 };
 
 const app = document.querySelector('#app');
@@ -136,7 +136,7 @@ function questionProgress() {
 function renderStart() {
   const hasProgress = state.records.length > 0;
   const isComplete = state.subject && state.records.length === QUESTIONS.length;
-  const buttonLabel = !state.subject ? '과목을 선택해 주세요' : isComplete ? '이 과목 다시 풀기' : hasProgress ? '이어서 풀기' : '학습 시작하기';
+  const buttonLabel = !state.subject ? '과목을 선택해 주세요' : isComplete ? '리포트 다시 보기' : hasProgress ? '이어서 풀기' : '학습 시작하기';
   app.innerHTML = `
     <section class="hero screen">
       <div class="hero-copy">
@@ -168,7 +168,7 @@ function renderStart() {
       <div class="subject-actions">
         <span class="small-note">로그인 없이 이용 · 과목별 결과는 이 브라우저에 저장</span>
         <div class="subject-buttons">
-          ${hasProgress && !isComplete ? '<button class="button button-secondary" id="reset-subject">처음부터 풀기</button>' : ''}
+          ${hasProgress ? '<button class="button button-secondary" id="reset-subject">처음부터 풀기</button>' : ''}
           <button class="button button-primary" id="start-button" ${state.subject ? '' : 'disabled'}>${buttonLabel} <span aria-hidden="true">→</span></button>
         </div>
       </div>
@@ -177,7 +177,7 @@ function renderStart() {
   document.querySelectorAll('[data-subject]').forEach(button => button.addEventListener('click', () => selectSubject(button.dataset.subject)));
   document.querySelector('#start-button').addEventListener('click', () => {
     if (!state.subject) return;
-    state = { ...state, view: 'question', records: isComplete ? [] : state.records, selection: null, confidence: 50 };
+    state = { ...state, view: isComplete ? 'report' : 'question', selection: null, confidence: 50 };
     saveState(); render();
   });
   document.querySelector('#reset-subject')?.addEventListener('click', () => {
@@ -267,8 +267,7 @@ function renderResult() {
         <div class="result-icon ${record.correct ? 'correct' : 'incorrect'}" aria-hidden="true">${record.correct ? '✓' : '×'}</div>
         <span class="eyebrow">Your result</span>
         <h2>${record.correct ? '정답입니다!' : '정답이 아닙니다.'}</h2>
-        <span class="pill ${record.category}">${category.label}</span>
-        <p class="muted" style="margin:17px 0 0">${category.note}</p>
+        <div class="result-category ${record.category}"><strong>${category.label}:</strong> ${category.note}</div>
         <div class="result-grid">
           <div class="stat-tile"><span>내 확신도</span><strong>${record.confidence}%</strong></div>
           <div class="stat-tile"><span>정답</span><strong>${escapeHtml(question.options[question.answer])}</strong></div>
@@ -289,7 +288,10 @@ function renderReport() {
   const accuracy = Math.round((correctCount / QUESTIONS.length) * 100);
   const averageConfidence = Math.round(state.records.reduce((sum, record) => sum + record.confidence, 0) / QUESTIONS.length);
   const counts = Object.fromEntries(Object.keys(CATEGORY).map(key => [key, state.records.filter(record => record.category === key).length]));
-  const reviewRecords = state.records.filter(record => record.category === 'over');
+  const reviewGroups = [
+    { key: 'over', description: '맞다고 믿었지만 틀린 문제를 다시 확인해 보세요.' },
+    { key: 'under', description: '맞혔지만 확신하지 못한 문제를 다시 살펴보세요.' }
+  ];
   const difference = averageConfidence - accuracy;
   const reflection = difference > 0
     ? '평균 확신도가 정답률보다 높아요. 확신했던 오답을 먼저 살펴보세요.'
@@ -308,13 +310,20 @@ function renderReport() {
           ${Object.entries(CATEGORY).map(([key, value]) => `<div class="category"><span class="pill ${key}">${value.label}</span><strong>${counts[key]}</strong></div>`).join('')}
         </div>
       </div>
-      <div class="section-card"><h3>먼저 다시 볼 문제</h3><p class="muted">높은 확신을 가지고 답했지만 틀린 문제예요.</p>
-        ${reviewRecords.length
-          ? `<div class="review-list">${reviewRecords.map(record => {
-              const question = QUESTIONS.find(item => item.id === record.questionId);
-              return `<div class="review-item"><span>문항 ${record.questionId} · 확신도 ${record.confidence}%</span><strong>${escapeHtml(question.question)}</strong><p class="muted" style="margin:8px 0 0">정답: ${escapeHtml(question.options[question.answer])}</p></div>`;
-            }).join('')}</div>`
-          : '<div class="empty-note">이번에는 높은 확신의 오답이 없어요.</div>'}
+      <div class="section-card"><h3>먼저 다시 볼 문제</h3><p class="muted">두 유형의 문제를 나눠서 확인해 보세요.</p>
+        ${reviewGroups.map(group => {
+          const records = state.records.filter(record => record.category === group.key);
+          return `<section class="review-group" aria-label="${CATEGORY[group.key].label}">
+            <div class="review-group-heading"><h4>${CATEGORY[group.key].label}</h4><span class="review-count">${records.length}문제</span></div>
+            <p class="muted">${group.description}</p>
+            ${records.length
+              ? `<div class="review-list">${records.map(record => {
+                  const question = QUESTIONS.find(item => item.id === record.questionId);
+                  return `<div class="review-item ${group.key}"><span>문항 ${record.questionId} · 확신도 ${record.confidence}%</span><strong>${escapeHtml(question.question)}</strong><p class="muted">정답: ${escapeHtml(question.options[question.answer])}</p></div>`;
+                }).join('')}</div>`
+              : `<div class="empty-note">이번에는 ${CATEGORY[group.key].label} 문제가 없어요.</div>`}
+          </section>`;
+        }).join('')}
       </div>
       <div class="report-actions"><button class="button button-secondary" id="another-subject">다른 과목 선택</button><button class="button button-primary" id="restart-quiz">${SUBJECTS[state.subject].label} 다시 풀기 <span aria-hidden="true">↻</span></button></div>
     </section>
